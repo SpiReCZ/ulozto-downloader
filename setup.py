@@ -26,6 +26,10 @@ setup(
         'numpy',
         'pysocks',
         'stem',
+        'uvicorn',
+        'fastapi',
+        'starlette',
+        'psutil'
     ],
     python_requires='>=3.7',
     packages=setuptools.find_packages(),

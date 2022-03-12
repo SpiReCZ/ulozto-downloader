@@ -4,3 +4,8 @@ ansicolors
 numpy
 pysocks
 stem
+setuptools
+uvicorn
+fastapi
+starlette
+psutil

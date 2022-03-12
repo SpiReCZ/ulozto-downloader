@@ -21,13 +21,19 @@ class Downloader:
     monitor: mp.Process
     captcha_solve_func: FunctionType
     download_url_queue: mp.Queue
+    file_data_queue: mp.Queue
     parts: int
 
-    def __init__(self, captcha_solve_func):
+    def __init__(self, captcha_solve_func, cli_mode=True, file_data_queue=None):
         self.captcha_solve_func = captcha_solve_func
         self.cli_initialized = False
+        self.terminating = False
+        self.processes = None
+        self.captcha_process = None
         self.monitor = None
         self.conn_timeout = None
+        self.cli_mode = cli_mode
+        self.file_data_queue = file_data_queue
 
     def terminate(self):
         self.terminating = True
@@ -38,16 +44,18 @@ class Downloader:
             self.cli_initialized = False
 
         print('Terminating download. Please wait for stopping all processes.')
-        if hasattr(self, "captcha_process") and self.captcha_process is not None:
+        if self.captcha_process is not None and self.captcha_process.is_alive():
             self.captcha_process.terminate()
         print('Terminate download processes')
-        if hasattr(self, "processes") and self.processes is not None:
+        if self.processes is not None:
             for p in self.processes:
-                p.terminate()
+                if p.is_alive():
+                    p.terminate()
         print('Download terminated.')
-        if hasattr(self, "monitor") and self.monitor is not None:
-            self.monitor.terminate()
-        print('End download monitor')
+        if self.cli_mode:
+            if self.monitor is not None and self.monitor.is_alive():
+                self.monitor.terminate()
+            print('End download monitor')
 
     def _captcha_print_func_wrapper(self, text):
         if not self.cli_initialized:
@@ -103,7 +111,7 @@ class Downloader:
             )
 
     @staticmethod
-    def _download_part(part, download_url_queue):
+    def _download_part(part, download_url_queue, print_status):
         """Download given part of the download.
 
             Arguments:
@@ -126,46 +134,50 @@ class Downloader:
             utils.print_part_status(id, colors.yellow(
                 "Status code 429 Too Many Requests returned... will try again in few seconds"))
             time.sleep(5)
-            return Downloader._download_part(part, download_url_queue)
+            return Downloader._download_part(part, download_url_queue, print_status)
 
         if r.status_code != 206 and r.status_code != 200:
             utils.print_part_status(id, colors.red(
                 f"Status code {r.status_code} returned: {part.pfrom + part.downloaded}/{part.pto}"))
-            sys.exit(1)
+            return
 
         # reimplement as multisegment write file class
         for chunk in r.iter_content(chunk_size=DOWN_CHUNK_SIZE):
             if chunk:  # filter out keep-alive new chunks
                 part.write(chunk)
                 part.now_downloaded += len(chunk)
-                elapsed = time.time() - part.started
 
-                # Print status line downloaded and speed
-                # speed in bytes per second:
-                speed = part.now_downloaded / elapsed if elapsed > 0 else 0
-                # remaining time in seconds:
-                remaining = (part.size - part.downloaded) / speed if speed > 0 else 0
+                if print_status:
+                    elapsed = time.time() - part.started
 
-                utils.print_part_status(id, "{:.2f}%\t{:.2f}/{:.2f} MB\tspeed: {:.2f} KB/s\telapsed: {}\tremaining: {}".format(
-                    round(part.downloaded / part.size * 100, 2),
-                    round(part.downloaded / 1024**2,
-                          2), round(part.size / 1024**2, 2),
-                    round(speed / 1024, 2),
-                    str(timedelta(seconds=round(elapsed))),
-                    str(timedelta(seconds=round(remaining))),
-                ))
+                    # Print status line downloaded and speed
+                    # speed in bytes per second:
+                    speed = part.now_downloaded / elapsed if elapsed > 0 else 0
+                    # remaining time in seconds:
+                    remaining = (part.size - part.downloaded) / speed if speed > 0 else 0
+
+                    utils.print_part_status(id,
+                                            "{:.2f}%\t{:.2f}/{:.2f} MB\tspeed: {:.2f} KB/s\telapsed: {}\tremaining: {}".format(
+                                                round(part.downloaded / part.size * 100, 2),
+                                                round(part.downloaded / 1024**2,
+                                                      2), round(part.size / 1024**2, 2),
+                                                round(speed / 1024, 2),
+                                                str(timedelta(seconds=round(elapsed))),
+                                                str(timedelta(seconds=round(remaining))),
+                                            ))
 
         # download end status
         r.close()
         part.elapsed = time.time() - part.started
-        utils.print_part_status(id, colors.green("Successfully downloaded {}{} MB in {} (speed {} KB/s)".format(
-            round(part.now_downloaded / 1024**2, 2),
-            "" if part.now_downloaded == part.downloaded else (
-                "/"+str(round(part.downloaded / 1024**2, 2))
-            ),
-            str(timedelta(seconds=round(part.elapsed))),
-            round(part.now_downloaded / part.elapsed / 1024, 2) if part.elapsed > 0 else 0
-        )))
+        if print_status:
+            utils.print_part_status(id, colors.green("Successfully downloaded {}{} MB in {} (speed {} KB/s)".format(
+                round(part.now_downloaded / 1024**2, 2),
+                "" if part.now_downloaded == part.downloaded else (
+                        "/"+str(round(part.downloaded / 1024**2, 2))
+                ),
+                str(timedelta(seconds=round(part.elapsed))),
+                round(part.now_downloaded / part.elapsed / 1024, 2) if part.elapsed > 0 else 0
+            )))
 
         # close part file files
         part.close()
@@ -206,15 +218,22 @@ class Downloader:
 
         except RuntimeError as e:
             print(colors.red('Cannot download file: ' + str(e)))
-            sys.exit(1)
+            raise e
 
         # Do check - only if .udown status file not exists get question
         output_filename = os.path.join(target_dir, page.filename)
-        if os.path.isfile(output_filename) and not os.path.isfile(output_filename+DOWNPOSTFIX):
-            print(colors.yellow(
-                "WARNING: File '{}' already exists, overwrite it? [y/n] ".format(output_filename)), end="")
-            if input().strip() != 'y':
-                sys.exit(1)
+        # .udown file is always present in cli_mode = False
+        if os.path.isfile(output_filename) and not os.path.isfile(output_filename + DOWNPOSTFIX):
+            if self.cli_mode:
+                print(colors.yellow(
+                    "WARNING: File '{}' already exists, overwrite it? [y/n] ".format(output_filename)), end="")
+                if input().strip() != 'y':
+                    sys.exit(1)
+            else:
+                # TODO: do not overwrite file, but serve it instead
+                print(colors.yellow(
+                    "WARNING: File '{}' already exists, but .udown file not present."
+                    "File will be overwritten..".format(output_filename)), end="")
 
         if page.quickDownloadURL is not None:
             print("You are VERY lucky, this is QUICK direct download without CAPTCHA, downloading as 1 quick part :)")
@@ -245,16 +264,19 @@ class Downloader:
         try:
             file_data = SegFileLoader(output_filename, total_size, parts)
             downloads = file_data.make_writers()
+            if self.file_data_queue is not None:
+                self.file_data_queue.put((output_filename, total_size, parts))
         except Exception as e:
             print(colors.red(
                 f"Failed: Can not create '{output_filename}' error: {e} "))
             self.terminate()
-            sys.exit()
+            raise e
 
         # 2. Initialize cli status table interface
-        # if windows, use 'cls', otherwise use 'clear'
-        os.system('cls' if os.name == 'nt' else 'clear')
-        sys.stdout.write("\033[?25l")  # hide cursor
+        if self.cli_mode:
+            # if windows, use 'cls', otherwise use 'clear'
+            os.system('cls' if os.name == 'nt' else 'clear')
+            sys.stdout.write("\033[?25l")  # hide cursor
         self.cli_initialized = True
         page.cli_initialized = True  # for tor in Page
         print(colors.blue("File:\t\t") + colors.bold(page.filename))
@@ -288,9 +310,10 @@ class Downloader:
         page.alreadyDownloaded = 0
 
         # save status monitor
-        self.monitor = mp.Process(target=Downloader._save_progress, args=(
-            file_data.filename, file_data.parts, file_data.size, 1/3))
-        self.monitor.start()
+        if self.cli_mode:
+            self.monitor = mp.Process(target=Downloader._save_progress, args=(
+                file_data.filename, file_data.parts, file_data.size, 1/3))
+            self.monitor.start()
 
         # 3. Start all downloads fill self.processes
         for part in downloads:
@@ -314,13 +337,13 @@ class Downloader:
 
             # Start download process in another process (parallel):
             p = mp.Process(target=Downloader._download_part,
-                           args=(part, self.download_url_queue))
+                           args=(part, self.download_url_queue, self.cli_mode))
             p.start()
             self.processes.append(p)
 
         if self.isLimited:
             # no need for another CAPTCHAs
-            self.captcha_process.terminate()
+            # self.captcha_process.terminate() # this effectively shutdowns fastapi server if triggered
             if self.isCaptcha:
                 utils.print_captcha_status(
                     "All downloads started, no need to solve another CAPTCHAs..", self.parts)
@@ -336,16 +359,17 @@ class Downloader:
                 success = False
 
         # clear cli
-        sys.stdout.write("\033[{};{}H".format(
-            parts + CLI_STATUS_STARTLINE + 2, 0))
-        sys.stdout.write("\033[K")
-        sys.stdout.write("\033[?25h")  # show cursor
+        if self.cli_mode:
+            sys.stdout.write("\033[{};{}H".format(
+                parts + CLI_STATUS_STARTLINE + 2, 0))
+            sys.stdout.write("\033[K")
+            sys.stdout.write("\033[?25h")  # show cursor
         self.cli_initialized = False
 
         # result end status
         if not success:
             print(colors.red("Failure of one or more downloads, exiting"))
-            sys.exit(1)
+            return
 
         elapsed = time.time() - started
         # speed in bytes per second:
@@ -359,8 +383,3 @@ class Downloader:
             str(timedelta(seconds=round(elapsed))),
             round(speed / 1024**2, 2)
         ))
-        # remove resume .udown file
-        udown_file = output_filename + DOWNPOSTFIX
-        if os.path.exists(udown_file):
-            print(f"Delete file: {udown_file}")
-            os.remove(udown_file)

@@ -1,8 +1,9 @@
 import argparse
+import os
 import sys
 import signal
 from os import path
-from uldlib import downloader, captcha, __version__, __path__
+from uldlib import downloader, captcha, __version__, __path__, const
 from uldlib.const import DEFAULT_CONN_TIMEOUT
 
 
@@ -43,5 +44,15 @@ def run():
 
     signal.signal(signal.SIGINT, sigint_handler)
 
-    d.download(args.url, args.parts, args.output, args.conn_timeout)
-    d.terminate()
+    try:
+        if "#!" in args.url:
+            args.url = args.url.split("#!")[0]
+        d.download(args.url, args.parts, args.output, args.conn_timeout)
+
+        # remove resume .udown file
+        udown_file = args.output + const.DOWNPOSTFIX
+        if os.path.exists(udown_file):
+            print(f"Delete file: {udown_file}")
+            os.remove(udown_file)
+    finally:
+        d.terminate()

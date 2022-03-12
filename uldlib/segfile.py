@@ -1,11 +1,12 @@
+import asyncio
 from math import ceil
 from . import const
 import os
 from sys import byteorder
 
 
-class SegFileWriter:
-    """Implementation segment write file"""
+class SegFile:
+    """Implementation segment file"""
 
     def __init__(self, file, parts, seg_idx):
         self.file = file
@@ -37,13 +38,50 @@ class SegFileWriter:
             self.size = self.total_size - self.pfrom
 
         # get downloaded
+        self._read_stat()
+
+        # seek file position
+        self.fp.seek(self.cur_pos, os.SEEK_SET)
+
+    def _read_stat(self):
         self.stat_pos = 1 + self.sbs + (self.id * self.sbs)
         self.sfp.seek(self.stat_pos, os.SEEK_SET)
         self.cur_pos = int.from_bytes(self.sfp.read(self.sbs), byteorder)
         self.downloaded = self.cur_pos - self.pfrom
 
-        # seek file position
-        self.fp.seek(self.cur_pos, os.SEEK_SET)
+    def close(self):
+        if not self.sfp.closed:
+            self.sfp.close()
+        if not self.fp.closed:
+            self.fp.close()
+
+
+class SegFileReader(SegFile):
+    """Implementation segment read file"""
+
+    async def read(self):
+        last_pos = self.pfrom
+        self.fp.seek(self.pfrom, os.SEEK_SET)
+
+        while last_pos < self.pto:
+            to_read = self.cur_pos - last_pos
+
+            while to_read > 0:
+                if const.OUTFILE_READ_BUF < to_read:
+                    cur_read = const.OUTFILE_READ_BUF
+                else:
+                    cur_read = to_read
+
+                yield self.fp.read(cur_read)
+                to_read = to_read - cur_read
+
+            last_pos = self.cur_pos
+            await asyncio.sleep(0.1)
+            self._read_stat()
+
+
+class SegFileWriter(SegFile):
+    """Implementation segment write file"""
 
     def _write_stat(self, newpos):
         self.sfp.seek(self.stat_pos, os.SEEK_SET)
@@ -52,15 +90,10 @@ class SegFileWriter:
     def write(self, chunk):
         self.fp.seek(self.cur_pos, os.SEEK_SET)
         wrt = self.fp.write(chunk)
+        self.fp.flush()
         self.downloaded += wrt
         self.cur_pos += wrt
         self._write_stat(self.cur_pos)
-
-    def close(self):
-        if not self.sfp.closed:
-            self.sfp.close()
-        if not self.fp.closed:
-            self.fp.close()
 
 
 class SegFileLoader:
@@ -164,8 +197,3 @@ class SegFileMonitor:
             return sizenow
         else:
             return 0
-
-    def clean(self):
-        if self.file_size is not None:
-            if os.path.exists(self.progfile):
-                os.remove(self.progfile)
