@@ -71,7 +71,7 @@ def initiate(url: str, parts: int):
     200: {"content": {const.MEDIA_TYPE_STREAM: {}}, },
     429: {"content": {const.MEDIA_TYPE_JSON: {}}, }
 })
-async def download_endpoint(background_tasks: BackgroundTasks, url: str, parts: Optional[int] = 10):
+async def download_endpoint(background_tasks: BackgroundTasks, url: str, parts: Optional[int] = default_parts):
     global downloader, process, queue
 
     # TODO: What happens when the same url is called twice and parts number changes?
