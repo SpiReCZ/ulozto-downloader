@@ -29,7 +29,7 @@ captcha_solve_fnc = captcha.AutoReadCaptcha(
 
 downloader: Downloader = None
 process: Process = None
-queue: Queue = Queue()
+queue: Queue = None
 
 
 async def generate_stream(filename: str, parts: int):
