@@ -212,7 +212,7 @@ class Downloader:
         print("Getting info (filename, filesize, ...)")
 
         try:
-            tor = TorRunner()
+            tor = TorRunner(target_dir)
             page = Page(url, target_dir, parts, tor, self.conn_timeout)
             page.parse()
 

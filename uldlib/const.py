@@ -13,3 +13,4 @@ DEFAULT_CONN_TIMEOUT = 30
 MODEL_DOWNLOAD_URL = "https://github.com/JanPalasek/ulozto-captcha-breaker/releases/download/v2.2/model.tflite"
 MEDIA_TYPE_STREAM = "application/octet-stream"
 MEDIA_TYPE_JSON = "application/json"
+TOR_DATA_DIR_PREFIX = "tor_data_dir_"

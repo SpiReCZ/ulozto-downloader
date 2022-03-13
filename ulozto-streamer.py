@@ -1,4 +1,7 @@
+#!/usr/bin/env python3
+
 import asyncio
+import os
 import signal
 import urllib.parse
 from multiprocessing import Queue, Process
@@ -10,21 +13,23 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTasks
 from starlette.responses import JSONResponse
 
-from uldlib import captcha, __path__, const
+from uldlib import captcha, const
 from uldlib.downloader import Downloader
 from uldlib.segfile import SegFileReader
 
 app = FastAPI()
 
-model_path = path.join(__path__[0], "model.tflite")
+data_folder = os.getenv('DATA_FOLDER', '')
+download_path = os.getenv('DOWNLOAD_FOLDER', '')
+default_parts = os.getenv('PARTS', 10)
+
+model_path = path.join(data_folder, "model.tflite")
 captcha_solve_fnc = captcha.AutoReadCaptcha(
     model_path, const.MODEL_DOWNLOAD_URL)
 
 downloader: Downloader = None
 process: Process = None
 queue: Queue = Queue()
-
-d_path = ""
 
 
 async def generate_stream(filename: str, parts: int):
@@ -58,7 +63,7 @@ def initiate(url: str, parts: int):
     queue = Queue()
     downloader = Downloader(captcha_solve_fnc, False, queue)
     process = Process(target=downloader_worker,
-                      args=(url, parts, d_path))
+                      args=(url, parts, download_path))
     process.start()
 
 

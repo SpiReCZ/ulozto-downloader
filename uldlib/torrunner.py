@@ -1,8 +1,11 @@
+import os
 import socket
+
 import stem.process
 from stem.control import Controller
+
+from . import const
 from .utils import print_tor_status
-import os
 import uuid
 import shutil
 import re
@@ -10,11 +13,11 @@ import re
 
 class TorRunner:
     """Running stem tor instance"""
-    ddir = ""
+    ddir: str
 
-    def __init__(self):
+    def __init__(self, ddir: str = ""):
         uid = str(uuid.uuid4())
-        self.ddir = f"tor_data_dir_{uid}"
+        self.ddir = os.path.join(ddir, f"{const.TOR_DATA_DIR_PREFIX}{uid}")
 
     def _port_not_use(self, port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
