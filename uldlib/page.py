@@ -283,7 +283,7 @@ class Page:
 
                     # https://github.com/setnicka/ulozto-downloader/issues/82
                     captcha_image_url = urljoin("https:", captcha_image_url)
-    
+
                     print_func("Image URL obtained, trying to solve")
                     captcha_answer = captcha_solve_func(
                         captcha_image_url, print_func=print_func)
