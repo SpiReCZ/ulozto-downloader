@@ -3,7 +3,7 @@ import os
 import sys
 import signal
 from os import path
-from uldlib import downloader, captcha, __version__, __path__, const
+from uldlib import downloader, captcha, __version__, __path__, const, utils
 from uldlib.const import DEFAULT_CONN_TIMEOUT
 from uldlib.torrunner import TorRunner
 
@@ -28,7 +28,7 @@ def run():
     args = parser.parse_args()
 
     if args.auto_captcha:
-        model_path = path.join(__path__[0], "model.tflite")
+        model_path = path.join(__path__[0], const.MODEL_FILENAME)
         captcha_solve_fnc = captcha.AutoReadCaptcha(
             model_path, const.MODEL_DOWNLOAD_URL)
     else:
@@ -46,10 +46,8 @@ def run():
     signal.signal(signal.SIGINT, sigint_handler)
 
     try:
-        if "#!" in args.url:
-            args.url = args.url.split("#!")[0]
+        args.url = utils.strip_tracking_info(args.url)
         d.download(args.url, args.parts, args.output, args.conn_timeout)
-
         # remove resume .udown file
         udown_file = args.output + const.DOWNPOSTFIX
         if os.path.exists(udown_file):

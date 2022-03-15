@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTasks
 from starlette.responses import JSONResponse
 
-from uldlib import captcha, const
+from uldlib import captcha, const, utils
 from uldlib.downloader import Downloader
 from uldlib.segfile import SegFileReader
 from uldlib.torrunner import TorRunner
@@ -26,7 +26,7 @@ download_path: str = os.getenv('DOWNLOAD_FOLDER', '')
 default_parts: int = int(os.getenv('PARTS', 10))
 auto_delete_downloads: bool = os.getenv('AUTO_DELETE_DOWNLOADS', '1').strip().lower() in ['true', '1', 't', 'y', 'yes']
 
-model_path = path.join(data_folder, "model.tflite")
+model_path = path.join(data_folder, const.MODEL_FILENAME)
 captcha_solve_fnc = captcha.AutoReadCaptcha(
     model_path, const.MODEL_DOWNLOAD_URL)
 
@@ -93,8 +93,7 @@ async def download_endpoint(background_tasks: BackgroundTasks, url: str, parts: 
             status_code=429
         )
 
-    if "#!" in url:
-        url = url.split("#!")[0]
+    url = utils.strip_tracking_info(url)
     initiate(url, parts)
 
     file_data: tuple = await asyncio.get_event_loop().run_in_executor(None, queue.get, True, 60)
