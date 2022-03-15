@@ -29,9 +29,8 @@ def run():
 
     if args.auto_captcha:
         model_path = path.join(__path__[0], "model.tflite")
-        model_download_url = "https://github.com/JanPalasek/ulozto-captcha-breaker/releases/download/v2.2/model.tflite"
         captcha_solve_fnc = captcha.AutoReadCaptcha(
-            model_path, model_download_url)
+            model_path, const.MODEL_DOWNLOAD_URL)
     else:
         captcha_solve_fnc = captcha.tkinter_user_prompt
 
