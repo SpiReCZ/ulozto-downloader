@@ -16,12 +16,15 @@ from starlette.responses import JSONResponse
 from uldlib import captcha, const
 from uldlib.downloader import Downloader
 from uldlib.segfile import SegFileReader
+from uldlib.torrunner import TorRunner
 
 app = FastAPI()
 
-data_folder = os.getenv('DATA_FOLDER', '')
-download_path = os.getenv('DOWNLOAD_FOLDER', '')
-default_parts = os.getenv('PARTS', 10)
+temp_path: str = os.getenv('TEMP_FOLDER', '')
+data_folder: str = os.getenv('DATA_FOLDER', '')
+download_path: str = os.getenv('DOWNLOAD_FOLDER', '')
+default_parts: int = int(os.getenv('PARTS', 10))
+auto_delete_downloads: bool = os.getenv('AUTO_DELETE_DOWNLOADS', '1').strip().lower() in ['true', '1', 't', 'y', 'yes']
 
 model_path = path.join(data_folder, "model.tflite")
 captcha_solve_fnc = captcha.AutoReadCaptcha(
@@ -30,11 +33,12 @@ captcha_solve_fnc = captcha.AutoReadCaptcha(
 downloader: Downloader = None
 process: Process = None
 queue: Queue = None
+tor: TorRunner = None
 
 
-async def generate_stream(filename: str, parts: int):
+async def generate_stream(file_path: str, parts: int):
     for seg_idx in range(parts):
-        reader = SegFileReader(filename, parts, seg_idx)
+        reader = SegFileReader(file_path, parts, seg_idx)
         async for data in reader.read():
             yield data
 
@@ -44,24 +48,31 @@ def downloader_worker(url: str, parts: int, target_dir: str):
     downloader.download(url, parts, target_dir)
 
 
-def cleanup():
-    global downloader, process, queue
+def cleanup(file_path: str = None):
+    global downloader, process, queue, tor
     if process is not None:
         process.join()
         process = None
     if queue is not None:
         queue.close()
         queue = None
+    if tor is not None:
+        tor = None
     if downloader is not None:
         downloader.terminate()
         downloader = None
+    if auto_delete_downloads and file_path is not None:
+        os.remove(file_path + const.DOWNPOSTFIX)
+        os.remove(file_path + const.CACHEPOSTFIX)
+        os.remove(file_path)
 
 
 def initiate(url: str, parts: int):
-    global downloader, process, queue
+    global downloader, process, queue, tor
 
+    tor = TorRunner(download_path)
     queue = Queue()
-    downloader = Downloader(captcha_solve_fnc, False, queue)
+    downloader = Downloader(tor, captcha_solve_fnc, False, queue)
     process = Process(target=downloader_worker,
                       args=(url, parts, download_path))
     process.start()
@@ -86,15 +97,17 @@ async def download_endpoint(background_tasks: BackgroundTasks, url: str, parts: 
         url = url.split("#!")[0]
     initiate(url, parts)
 
-    background_tasks.add_task(cleanup)
     file_data: tuple = await asyncio.get_event_loop().run_in_executor(None, queue.get, True, 60)
 
-    filename = file_data[0]
+    file_path = file_data[0]
+    filename = file_data[1]
     filename_encoded = urllib.parse.quote_plus(filename)
-    size = file_data[1]
+    size = file_data[2]
+
+    background_tasks.add_task(cleanup, file_path)
 
     return StreamingResponse(
-        generate_stream(filename, parts),
+        generate_stream(file_path, parts),
         headers={
             "Content-Length": str(size),
             "Content-Disposition": f"attachment; filename=\"{filename_encoded}\"",

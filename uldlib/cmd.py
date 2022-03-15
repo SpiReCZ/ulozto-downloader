@@ -5,6 +5,7 @@ import signal
 from os import path
 from uldlib import downloader, captcha, __version__, __path__, const
 from uldlib.const import DEFAULT_CONN_TIMEOUT
+from uldlib.torrunner import TorRunner
 
 
 def run():
@@ -34,7 +35,8 @@ def run():
     else:
         captcha_solve_fnc = captcha.tkinter_user_prompt
 
-    d = downloader.Downloader(captcha_solve_fnc)
+    tor = TorRunner(args.output)
+    d = downloader.Downloader(tor, captcha_solve_fnc)
 
     # Register sigint handler
     def sigint_handler(sig, frame):

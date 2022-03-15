@@ -23,8 +23,9 @@ class Downloader:
     download_url_queue: mp.Queue
     file_data_queue: mp.Queue
     parts: int
+    tor: TorRunner
 
-    def __init__(self, captcha_solve_func, cli_mode=True, file_data_queue=None):
+    def __init__(self, tor: TorRunner, captcha_solve_func, cli_mode=True, file_data_queue=None):
         self.captcha_solve_func = captcha_solve_func
         self.cli_initialized = False
         self.terminating = False
@@ -34,6 +35,7 @@ class Downloader:
         self.conn_timeout = None
         self.cli_mode = cli_mode
         self.file_data_queue = file_data_queue
+        self.tor = tor
 
     def terminate(self):
         self.terminating = True
@@ -212,8 +214,7 @@ class Downloader:
         print("Getting info (filename, filesize, ...)")
 
         try:
-            tor = TorRunner(target_dir)
-            page = Page(url, target_dir, parts, tor, self.conn_timeout)
+            page = Page(url, target_dir, parts, self.tor, self.conn_timeout)
             page.parse()
 
         except RuntimeError as e:
@@ -265,7 +266,7 @@ class Downloader:
             file_data = SegFileLoader(output_filename, total_size, parts)
             downloads = file_data.make_writers()
             if self.file_data_queue is not None:
-                self.file_data_queue.put((output_filename, total_size, parts))
+                self.file_data_queue.put((output_filename, page.filename, total_size, parts))
         except Exception as e:
             print(colors.red(
                 f"Failed: Can not create '{output_filename}' error: {e} "))
