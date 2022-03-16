@@ -34,6 +34,8 @@ downloader: Downloader = None
 process: Process = None
 queue: Queue = None
 tor: TorRunner = None
+file_data: tuple = None
+global_url: str = None
 
 
 async def generate_stream(file_path: str, parts: int):
@@ -49,7 +51,7 @@ def downloader_worker(url: str, parts: int, target_dir: str):
 
 
 def cleanup(file_path: str = None):
-    global downloader, process, queue, tor
+    global downloader, process, queue, tor, file_data, global_url
     if process is not None:
         process.join()
         process = None
@@ -57,18 +59,37 @@ def cleanup(file_path: str = None):
         queue.close()
         queue = None
     if tor is not None:
+        tor.stop()
         tor = None
     if downloader is not None:
         downloader.terminate()
         downloader = None
+    if file_data is not None:
+        file_data = None
+    if global_url is not None:
+        global_url = None
     if auto_delete_downloads and file_path is not None:
         os.remove(file_path + const.DOWNPOSTFIX)
         os.remove(file_path + const.CACHEPOSTFIX)
         os.remove(file_path)
 
 
-def initiate(url: str, parts: int):
-    global downloader, process, queue, tor
+@app.get("/initiate", responses={
+    200: {"content": {const.MEDIA_TYPE_JSON: {}}, },
+    429: {"content": {const.MEDIA_TYPE_JSON: {}}, }
+})
+async def initiate(url: str, parts: Optional[int] = default_parts):
+    global downloader, process, queue, tor, file_data, global_url
+
+    # TODO: What happens when the same url is called twice and parts number changes?
+    if downloader is not None:
+        return JSONResponse(
+            content={"url": f"{url}",
+                     "message": "Downloader is busy.. Free download is limited to single download."},
+            status_code=429
+        )
+
+    url = utils.strip_tracking_info(url)
 
     tor = TorRunner(download_path)
     queue = Queue()
@@ -77,31 +98,50 @@ def initiate(url: str, parts: int):
                       args=(url, parts, download_path))
     process.start()
 
+    file_data = await asyncio.get_event_loop().run_in_executor(None, queue.get, True, 60)
+
+    file_path = file_data[0]
+    filename = file_data[1]
+    size = file_data[2]
+    parts = file_data[3]
+    global_url = url
+
+    return JSONResponse(
+        content=[{"url": f"{url}",
+                  "filename": f"{filename}",
+                  "file_path": f"{file_path}",
+                  "size": f"{size}",
+                  "parts": f"{parts}",
+                  "message": "Downloader has started.."}],
+        status_code=200
+    )
+
 
 @app.get("/download", responses={
     200: {"content": {const.MEDIA_TYPE_STREAM: {}}, },
     429: {"content": {const.MEDIA_TYPE_JSON: {}}, }
 })
-async def download_endpoint(background_tasks: BackgroundTasks, url: str, parts: Optional[int] = default_parts):
+async def download_endpoint(background_tasks: BackgroundTasks, url: str):
     global downloader, process, queue
 
-    # TODO: What happens when the same url is called twice and parts number changes?
-    if downloader is not None:
+    if downloader is None:
         return JSONResponse(
             content=[{"url": f"{url}",
-                      "message": "Downloader is busy.. Free download is limited to single download."}],
+                      "message": "Download not initiated."}],
+            status_code=400
+        )
+    elif global_url != url:
+        return JSONResponse(
+            content=[{"url": f"{url}",
+                      "message": "Another download initiated."}],
             status_code=429
         )
-
-    url = utils.strip_tracking_info(url)
-    initiate(url, parts)
-
-    file_data: tuple = await asyncio.get_event_loop().run_in_executor(None, queue.get, True, 60)
 
     file_path = file_data[0]
     filename = file_data[1]
     filename_encoded = urllib.parse.quote_plus(filename)
     size = file_data[2]
+    parts = file_data[3]
 
     background_tasks.add_task(cleanup, file_path)
 
