@@ -46,7 +46,6 @@ def run():
     signal.signal(signal.SIGINT, sigint_handler)
 
     try:
-        args.url = utils.strip_tracking_info(args.url)
         d.download(args.url, args.parts, args.output, args.conn_timeout)
         # remove resume .udown file
         udown_file = args.output + const.DOWNPOSTFIX

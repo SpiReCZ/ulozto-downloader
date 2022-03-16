@@ -28,7 +28,3 @@ def print_tor_status(text, parts):
 def print_saved_status(text, parts):
     _print(colors.yellow(f"[Progress]\t {text}"),
            y=(parts + 1 + const.CLI_STATUS_STARTLINE))
-
-
-def strip_tracking_info(url: str):
-    return url.split("#!")[0] if "#!" in url else url

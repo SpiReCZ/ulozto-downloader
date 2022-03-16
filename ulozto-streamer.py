@@ -89,8 +89,6 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
             status_code=429
         )
 
-    url = utils.strip_tracking_info(url)
-
     tor = TorRunner(download_path)
     queue = Queue()
     downloader = Downloader(tor, captcha_solve_fnc, False, queue)
