@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTasks
 from starlette.responses import JSONResponse
 
-from uldlib import captcha, const, utils
+from uldlib import captcha, const
 from uldlib.downloader import Downloader
 from uldlib.segfile import SegFileReader
 from uldlib.torrunner import TorRunner
@@ -24,7 +24,7 @@ temp_path: str = os.getenv('TEMP_FOLDER', '')
 data_folder: str = os.getenv('DATA_FOLDER', '')
 download_path: str = os.getenv('DOWNLOAD_FOLDER', '')
 default_parts: int = int(os.getenv('PARTS', 10))
-auto_delete_downloads: bool = os.getenv('AUTO_DELETE_DOWNLOADS', '1').strip().lower() in ['true', '1', 't', 'y', 'yes']
+auto_delete_downloads: bool = os.getenv('AUTO_DELETE_DOWNLOADS', '0').strip().lower() in ['true', '1', 't', 'y', 'yes']
 
 model_path = path.join(data_folder, const.MODEL_FILENAME)
 captcha_solve_fnc = captcha.AutoReadCaptcha(
@@ -50,8 +50,20 @@ def downloader_worker(url: str, parts: int, target_dir: str):
     downloader.download(url, parts, target_dir)
 
 
-def cleanup(file_path: str = None):
-    global downloader, process, queue, tor, file_data, global_url
+def cleanup_stream(file_path: str = None):
+    global file_data, global_url
+    if file_data is not None:
+        file_data = None
+    if global_url is not None:
+        global_url = None
+    if auto_delete_downloads and file_path is not None:
+        os.remove(file_path + const.DOWNPOSTFIX)
+        os.remove(file_path + const.CACHEPOSTFIX)
+        os.remove(file_path)
+
+
+def cleanup_download():
+    global downloader, process, queue, tor
     if process is not None:
         process.join()
         process = None
@@ -64,21 +76,13 @@ def cleanup(file_path: str = None):
     if downloader is not None:
         downloader.terminate()
         downloader = None
-    if file_data is not None:
-        file_data = None
-    if global_url is not None:
-        global_url = None
-    if auto_delete_downloads and file_path is not None:
-        os.remove(file_path + const.DOWNPOSTFIX)
-        os.remove(file_path + const.CACHEPOSTFIX)
-        os.remove(file_path)
 
 
 @app.get("/initiate", responses={
     200: {"content": {const.MEDIA_TYPE_JSON: {}}, },
     429: {"content": {const.MEDIA_TYPE_JSON: {}}, }
 })
-async def initiate(url: str, parts: Optional[int] = default_parts):
+async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[int] = default_parts):
     global downloader, process, queue, tor, file_data, global_url
 
     # TODO: What happens when the same url is called twice and parts number changes?
@@ -96,6 +100,8 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
                       args=(url, parts, download_path))
     process.start()
 
+    background_tasks.add_task(cleanup_download)
+
     file_data = await asyncio.get_event_loop().run_in_executor(None, queue.get, True, 60)
 
     file_path = file_data[0]
@@ -105,12 +111,12 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
     global_url = url
 
     return JSONResponse(
-        content=[{"url": f"{url}",
-                  "filename": f"{filename}",
-                  "file_path": f"{file_path}",
-                  "size": f"{size}",
-                  "parts": f"{parts}",
-                  "message": "Downloader has started.."}],
+        content={"url": f"{url}",
+                 "filename": f"{filename}",
+                 "file_path": f"{file_path}",
+                 "size": f"{size}",
+                 "parts": f"{parts}",
+                 "message": "Downloader has started.."},
         status_code=200
     )
 
@@ -122,16 +128,16 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
 async def download_endpoint(background_tasks: BackgroundTasks, url: str):
     global downloader, process, queue
 
-    if downloader is None:
+    if file_data is None:
         return JSONResponse(
-            content=[{"url": f"{url}",
-                      "message": "Download not initiated."}],
+            content={"url": f"{url}",
+                     "message": "Download not initiated."},
             status_code=400
         )
     elif global_url != url:
         return JSONResponse(
-            content=[{"url": f"{url}",
-                      "message": "Another download initiated."}],
+            content={"url": f"{url}",
+                     "message": "Another download initiated."},
             status_code=429
         )
 
@@ -141,7 +147,7 @@ async def download_endpoint(background_tasks: BackgroundTasks, url: str):
     size = file_data[2]
     parts = file_data[3]
 
-    background_tasks.add_task(cleanup, file_path)
+    background_tasks.add_task(cleanup_stream, file_path)
 
     return StreamingResponse(
         generate_stream(file_path, parts),

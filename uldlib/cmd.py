@@ -1,7 +1,7 @@
 import argparse
 import os
-import sys
 import signal
+import sys
 from os import path
 from uldlib import downloader, captcha, __version__, __path__, const, utils
 from uldlib.const import DEFAULT_CONN_TIMEOUT
