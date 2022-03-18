@@ -93,7 +93,7 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
             status_code=429
         )
 
-    tor = TorRunner(download_path)
+    tor = TorRunner(temp_path)
     queue = Queue()
     downloader = Downloader(tor, captcha_solve_fnc, False, queue)
     process = Process(target=downloader_worker,
