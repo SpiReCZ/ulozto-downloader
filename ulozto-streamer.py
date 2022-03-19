@@ -102,7 +102,7 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
 
     background_tasks.add_task(cleanup_download)
 
-    file_data = await asyncio.get_event_loop().run_in_executor(None, queue.get, True, 60)
+    file_data = await asyncio.get_event_loop().run_in_executor(None, queue.get)
 
     file_path = file_data[0]
     filename = file_data[1]
