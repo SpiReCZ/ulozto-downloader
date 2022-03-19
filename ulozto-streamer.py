@@ -38,13 +38,14 @@ file_data: tuple = None
 global_url: str = None
 
 
-async def generate_stream(request: Request, file_path: str, parts: int):
+async def generate_stream(request: Request, background_tasks: BackgroundTasks, file_path: str, parts: int):
     for seg_idx in range(parts):
         reader = SegFileReader(file_path, parts, seg_idx)
         async for data in reader.read():
             if await request.is_disconnected():
-                break
+                return
             yield data
+        background_tasks.add_task(cleanup_stream, file_path)
 
 
 def downloader_worker(url: str, parts: int, target_dir: str):
@@ -58,7 +59,7 @@ def cleanup_stream(file_path: str = None):
         file_data = None
     if global_url is not None:
         global_url = None
-    if auto_delete_downloads and file_path is not None:
+    if auto_delete_downloads:
         os.remove(file_path + const.DOWNPOSTFIX)
         os.remove(file_path + const.CACHEPOSTFIX)
         os.remove(file_path)
@@ -88,7 +89,7 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
     global downloader, process, queue, tor, file_data, global_url
 
     # TODO: What happens when the same url is called twice and parts number changes?
-    if downloader is not None:
+    if downloader is not None or file_data is not None:
         return JSONResponse(
             content={"url": f"{url}",
                      "message": "Downloader is busy.. Free download is limited to single download."},
@@ -149,10 +150,8 @@ async def download_endpoint(request: Request, background_tasks: BackgroundTasks,
     size = file_data[2]
     parts = file_data[3]
 
-    background_tasks.add_task(cleanup_stream, file_path)
-
     return StreamingResponse(
-        generate_stream(request, file_path, parts),
+        generate_stream(request, background_tasks, file_path, parts),
         headers={
             "Content-Length": str(size),
             "Content-Disposition": f"attachment; filename=\"{filename_encoded}\"",
