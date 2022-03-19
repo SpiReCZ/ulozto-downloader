@@ -8,7 +8,7 @@ from multiprocessing import Queue, Process
 from os import path
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTasks
 from starlette.responses import JSONResponse
@@ -38,10 +38,12 @@ file_data: tuple = None
 global_url: str = None
 
 
-async def generate_stream(file_path: str, parts: int):
+async def generate_stream(request: Request, file_path: str, parts: int):
     for seg_idx in range(parts):
         reader = SegFileReader(file_path, parts, seg_idx)
         async for data in reader.read():
+            if await request.is_disconnected():
+                break
             yield data
 
 
@@ -125,7 +127,7 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
     200: {"content": {const.MEDIA_TYPE_STREAM: {}}, },
     429: {"content": {const.MEDIA_TYPE_JSON: {}}, }
 })
-async def download_endpoint(background_tasks: BackgroundTasks, url: str):
+async def download_endpoint(request: Request, background_tasks: BackgroundTasks, url: str):
     global downloader, process, queue
 
     if file_data is None:
@@ -150,7 +152,7 @@ async def download_endpoint(background_tasks: BackgroundTasks, url: str):
     background_tasks.add_task(cleanup_stream, file_path)
 
     return StreamingResponse(
-        generate_stream(file_path, parts),
+        generate_stream(request, file_path, parts),
         headers={
             "Content-Length": str(size),
             "Content-Disposition": f"attachment; filename=\"{filename_encoded}\"",
