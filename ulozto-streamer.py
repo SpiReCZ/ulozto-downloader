@@ -41,8 +41,11 @@ global_url: str = None
 async def generate_stream(request: Request, background_tasks: BackgroundTasks, file_path: str, parts: int):
     for seg_idx in range(parts):
         reader = SegFileReader(file_path, parts, seg_idx)
-        async for data in reader.read():
+        stream_generator = reader.read()
+        async for data in stream_generator:
             if await request.is_disconnected():
+                print("Client has closed download connection prematurely...")
+                await stream_generator.aclose()
                 return
             yield data
         background_tasks.add_task(cleanup_stream, file_path)
@@ -89,23 +92,24 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
     global downloader, process, queue, tor, file_data, global_url
 
     # TODO: What happens when the same url is called twice and parts number changes?
-    if downloader is not None or file_data is not None:
+    if global_url is not None and global_url != url:
         return JSONResponse(
             content={"url": f"{url}",
                      "message": "Downloader is busy.. Free download is limited to single download."},
             status_code=429
         )
 
-    tor = TorRunner(temp_path)
-    queue = Queue()
-    downloader = Downloader(tor, captcha_solve_fnc, False, queue)
-    process = Process(target=downloader_worker,
-                      args=(url, parts, download_path))
-    process.start()
+    if file_data is None:
+        tor = TorRunner(temp_path)
+        queue = Queue()
+        downloader = Downloader(tor, captcha_solve_fnc, False, queue)
+        process = Process(target=downloader_worker,
+                          args=(url, parts, download_path))
+        process.start()
 
-    background_tasks.add_task(cleanup_download)
+        background_tasks.add_task(cleanup_download)
 
-    file_data = await asyncio.get_event_loop().run_in_executor(None, queue.get)
+        file_data = await asyncio.get_event_loop().run_in_executor(None, queue.get)
 
     file_path = file_data[0]
     filename = file_data[1]
@@ -126,6 +130,7 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
 
 @app.get("/download", responses={
     200: {"content": {const.MEDIA_TYPE_STREAM: {}}, },
+    400: {"content": {const.MEDIA_TYPE_JSON: {}}, },
     429: {"content": {const.MEDIA_TYPE_JSON: {}}, }
 })
 async def download_endpoint(request: Request, background_tasks: BackgroundTasks, url: str):
