@@ -208,7 +208,6 @@ class Page:
         """
 
         self.numTorLinks = 0
-        self.torRunning = False
         self.cacheEmpty = False
         self.linkCache = LinkCache(path.join(self.target_dir, self.filename))
 
@@ -221,25 +220,12 @@ class Page:
                 yield link
 
         while (self.numTorLinks + self.alreadyDownloaded) < self.parts:
-            if not self.torRunning:
-                print("Starting TOR...")
-                # tor started after cli initialized
-                try:
-                    self.tor.start(
-                        cli_initialized=self.cli_initialized, parts=self.parts)
-                    self.torRunning = True
-                    proxies = {
-                        'http': 'socks5://127.0.0.1:' + str(self.tor.tor_ports[0]),
-                        'https': 'socks5://127.0.0.1:' + str(self.tor.tor_ports[0])
-                    }
-
-                except OSError as e:
-                    self._error_net_stat(
-                        f"Tor start failed: {e}, exiting.. try run program again..", print_func)
-                    # remove tor data
-                    if path.exists(self.tor.ddir):
-                        shutil.rmtree(self.tor.ddir, ignore_errors=True)
-                    sys.exit(1)
+            if self.tor.torRunning is False:
+                self.tor.launch(self.cli_initialized, self.parts)
+            proxies = {
+                'http': 'socks5://127.0.0.1:' + str(self.tor.tor_ports[0]),
+                'https': 'socks5://127.0.0.1:' + str(self.tor.tor_ports[0])
+            }
 
             # reload tor after 1. use or all except badCatcha case
             reload = False

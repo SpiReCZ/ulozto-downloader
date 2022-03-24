@@ -51,8 +51,9 @@ async def generate_stream(request: Request, background_tasks: BackgroundTasks, f
                     await stream_generator.aclose()
                     return
                 yield data
-            while downloader is not None:
-                await asyncio.sleep(0.1)
+        while downloader is not None:
+            await asyncio.sleep(0.1)
+        if not await request.is_disconnected():
             background_tasks.add_task(cleanup_stream, file_path)
 
 
@@ -109,6 +110,7 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
     if file_data is None:
         global_url = url
         tor = TorRunner(temp_path)
+        tor.launch(False, parts)
         queue = Queue()
         downloader = Downloader(tor, captcha_solve_fnc, False, queue)
         process = Process(target=downloader_worker,

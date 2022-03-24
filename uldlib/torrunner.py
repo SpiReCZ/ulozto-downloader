@@ -1,5 +1,6 @@
 import os
 import socket
+import sys
 
 import stem.process
 from stem.control import Controller
@@ -16,6 +17,7 @@ class TorRunner:
     ddir: str
 
     def __init__(self, ddir: str = ""):
+        self.torRunning = False
         uid = str(uuid.uuid4())
         self.ddir = os.path.join(ddir, f"{const.TOR_DATA_DIR_PREFIX}{uid}")
 
@@ -34,6 +36,22 @@ class TorRunner:
                 ports.append(at)
             at += 1
         return (ports[0], ports[1])
+
+    def launch(self, cli_initialized: bool, parts: int):
+        if not self.torRunning:
+            print("Starting TOR...")
+            # tor started after cli initialized
+            try:
+                self.start(
+                    cli_initialized=cli_initialized, parts=parts)
+                self.torRunning = True
+
+            except OSError as e:
+                print(f"Tor start failed: {e}, exiting.. try run program again..")
+                # remove tor data
+                if os.path.exists(self.ddir):
+                    shutil.rmtree(self.ddir, ignore_errors=True)
+                sys.exit(1)
 
     def start(self, cli_initialized=False, parts=0):
         os.mkdir(self.ddir)
@@ -80,6 +98,9 @@ class TorRunner:
         if hasattr(self, "process"):
             print("Terminating tor..")
             self.process.terminate()
+            if self.process.wait(10) is None:
+                print("Killing zombie tor process.")
+                self.process.kill()
 
         if os.path.exists(self.ddir):
             shutil.rmtree(self.ddir, ignore_errors=True)
