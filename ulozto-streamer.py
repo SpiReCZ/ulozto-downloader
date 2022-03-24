@@ -103,9 +103,9 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
                      "message": "Downloader is busy.. Free download is limited to single download."},
             status_code=429
         )
-    global_url = url
 
     if file_data is None:
+        global_url = url
         tor = TorRunner(temp_path)
         queue = Queue()
         downloader = Downloader(tor, captcha_solve_fnc, False, queue)
