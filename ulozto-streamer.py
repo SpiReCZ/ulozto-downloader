@@ -4,6 +4,7 @@ import asyncio
 import os
 import signal
 import urllib.parse
+from asyncio import CancelledError
 from contextlib import suppress
 from multiprocessing import Queue, Process
 from os import path
@@ -43,15 +44,16 @@ async def generate_stream(request: Request, background_tasks: BackgroundTasks, f
     for seg_idx in range(parts):
         reader = SegFileReader(file_path, parts, seg_idx)
         stream_generator = reader.read()
-        async for data in stream_generator:
-            if await request.is_disconnected():
-                print("Client has closed download connection prematurely...")
-                await stream_generator.aclose()
-                return
-            yield data
-        while downloader is not None:
-            await asyncio.sleep(0.1)
-        background_tasks.add_task(cleanup_stream, file_path)
+        with suppress(CancelledError):
+            async for data in stream_generator:
+                if await request.is_disconnected():
+                    print("Client has closed download connection prematurely...")
+                    await stream_generator.aclose()
+                    return
+                yield data
+            while downloader is not None:
+                await asyncio.sleep(0.1)
+            background_tasks.add_task(cleanup_stream, file_path)
 
 
 def downloader_worker(url: str, parts: int, target_dir: str):
