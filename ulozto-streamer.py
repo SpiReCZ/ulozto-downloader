@@ -103,6 +103,7 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
                      "message": "Downloader is busy.. Free download is limited to single download."},
             status_code=429
         )
+    global_url = url
 
     if file_data is None:
         tor = TorRunner(temp_path)
@@ -120,7 +121,6 @@ async def initiate(background_tasks: BackgroundTasks, url: str, parts: Optional[
     filename = file_data[1]
     size = file_data[2]
     parts = file_data[3]
-    global_url = url
 
     return JSONResponse(
         content={"url": f"{url}",
