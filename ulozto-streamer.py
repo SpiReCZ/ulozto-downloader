@@ -4,6 +4,7 @@ import asyncio
 import os
 import signal
 import urllib.parse
+from contextlib import suppress
 from multiprocessing import Queue, Process
 from os import path
 from typing import Optional
@@ -48,6 +49,8 @@ async def generate_stream(request: Request, background_tasks: BackgroundTasks, f
                 await stream_generator.aclose()
                 return
             yield data
+        while downloader is not None:
+            await asyncio.sleep(0.1)
         background_tasks.add_task(cleanup_stream, file_path)
 
 
@@ -63,9 +66,11 @@ def cleanup_stream(file_path: str = None):
     if global_url is not None:
         global_url = None
     if auto_delete_downloads:
-        os.remove(file_path + const.DOWNPOSTFIX)
-        os.remove(file_path + const.CACHEPOSTFIX)
-        os.remove(file_path)
+        print(f"Cleanup of: {file_path}")
+        with suppress(FileNotFoundError):
+            os.remove(file_path + const.DOWNPOSTFIX)
+            os.remove(file_path + const.CACHEPOSTFIX)
+            os.remove(file_path)
 
 
 def cleanup_download():
