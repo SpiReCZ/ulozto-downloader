@@ -41,19 +41,23 @@ global_url: str = None
 
 
 async def generate_stream(request: Request, background_tasks: BackgroundTasks, file_path: str, parts: int):
-    for seg_idx in range(parts):
-        reader = SegFileReader(file_path, parts, seg_idx)
-        stream_generator = reader.read()
-        with suppress(CancelledError):
-            async for data in stream_generator:
-                if await request.is_disconnected():
-                    print("Client has closed download connection prematurely...")
-                    await stream_generator.aclose()
-                    return
-                yield data
-        while downloader is not None:
-            await asyncio.sleep(0.1)
-        if not await request.is_disconnected():
+    download_canceled = False
+    try:
+        for seg_idx in range(parts):
+            reader = SegFileReader(file_path, parts, seg_idx)
+            stream_generator = reader.read()
+            with suppress(CancelledError):
+                async for data in stream_generator:
+                    if await request.is_disconnected():
+                        download_canceled = True
+                        print("Client has closed download connection prematurely...")
+                        await stream_generator.aclose()
+                        return
+                    yield data
+    finally:
+        if not download_canceled:
+            while downloader is not None:
+                await asyncio.sleep(0.1)
             background_tasks.add_task(cleanup_stream, file_path)
 
 
