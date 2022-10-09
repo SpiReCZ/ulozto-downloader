@@ -110,7 +110,5 @@ class TorRunner:
         self.stop()
 
 
-def _error_net_stat(self, err, log_func):
-    self.stats["all"] += 1
+def _error_net_stat(err, log_func):
     log_func(f"Network error get new TOR connection: {err}", level=LogLevel.ERROR)
-    self.stats["net"] += 1
