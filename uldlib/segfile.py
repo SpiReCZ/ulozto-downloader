@@ -88,7 +88,7 @@ class SegFileReader(SegFile):
                 to_read = to_read - cur_read
 
             last_pos = self.cur_pos
-            sleep(0.1)
+            sleep(0.01)
             self._read_stat()
 
 
@@ -112,7 +112,7 @@ class AsyncSegFileReader(SegFileReader):
                 to_read = to_read - cur_read
 
             last_pos = self.cur_pos
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.01)
             self._read_stat()
 
 
