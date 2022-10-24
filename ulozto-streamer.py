@@ -29,6 +29,7 @@ data_folder: str = os.getenv('DATA_FOLDER', '')
 download_path: str = os.getenv('DOWNLOAD_FOLDER', '')
 default_parts: int = int(os.getenv('PARTS', 10))
 auto_delete_downloads: bool = os.getenv('AUTO_DELETE_DOWNLOADS', '0').strip().lower() in ['true', '1', 't', 'y', 'yes']
+tor_on_start: bool = os.getenv('TOR_ON_START', '0').strip().lower() in ['true', '1', 't', 'y', 'yes']
 
 model_path = path.join(data_folder, const.MODEL_FILENAME)
 frontend: WebAppFrontend = WebAppFrontend()
@@ -39,6 +40,10 @@ executor = ThreadPoolExecutor(max_workers=2)
 downloader: Downloader = None
 tor: TorRunner = None
 global_url: str = None
+
+if tor_on_start:
+    tor = TorRunner(temp_path)
+    tor.launch(captcha_solve_fnc.log)
 
 
 async def generate_stream(request: Request, background_tasks: BackgroundTasks, file_path: str, parts: int):
@@ -69,7 +74,7 @@ def cleanup_download(file_path: str = None):
     if downloader is not None:
         downloader.terminate()
         downloader = None
-    if tor is not None:
+    if tor is not None and not tor_on_start:
         tor.stop()
         tor = None
     if auto_delete_downloads:
@@ -97,8 +102,10 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
 
     if downloader is None:
         global_url = url
-        tor = TorRunner(temp_path)
-        tor.launch(captcha_solve_fnc.log)
+        if not tor_on_start:
+            tor = TorRunner(temp_path)
+            await tor.launch(captcha_solve_fnc.log)
+
         downloader = Downloader(tor, frontend, captcha_solve_fnc)
 
         asyncio.get_event_loop().run_in_executor(executor, downloader.download, url, parts, download_path)
