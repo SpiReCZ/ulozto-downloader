@@ -102,16 +102,23 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
 
     if downloader is None:
         global_url = url
-        if not tor_on_start:
-            tor = TorRunner(temp_path)
-            await tor.launch(captcha_solve_fnc.log)
+        try:
+            if not tor_on_start:
+                tor = TorRunner(temp_path)
+                await tor.launch(captcha_solve_fnc.log)
 
-        downloader = Downloader(tor, frontend, captcha_solve_fnc)
+            downloader = Downloader(tor, frontend, captcha_solve_fnc)
 
-        asyncio.get_event_loop().run_in_executor(executor, downloader.download, url, parts, download_path)
+            asyncio.get_event_loop().run_in_executor(executor, downloader.download, url, parts, download_path)
 
-        while downloader.total_size is None:
-            await asyncio.sleep(0.1)
+            while downloader.total_size is None:
+                await asyncio.sleep(0.1)
+        except:
+            return JSONResponse(
+                content={"url": f"{url}",
+                         "message": "Recoverable Download error."},
+                status_code=429
+            )
 
     file_path = downloader.output_filename
     filename = downloader.filename
@@ -155,12 +162,20 @@ async def download_endpoint(request: Request, background_tasks: BackgroundTasks,
     size = downloader.total_size
     parts = downloader.parts
 
-    return StreamingResponse(
-        generate_stream(request, background_tasks, file_path, parts),
-        headers={
-            "Content-Length": str(size),
-            "Content-Disposition": f"attachment; filename=\"{filename_encoded}\"",
-        }, media_type=const.MEDIA_TYPE_STREAM)
+    try:
+        return StreamingResponse(
+            generate_stream(request, background_tasks, file_path, parts),
+            headers={
+                "Content-Length": str(size),
+                "Content-Disposition": f"attachment; filename=\"{filename_encoded}\"",
+            }, media_type=const.MEDIA_TYPE_STREAM)
+    except:
+        cleanup_download(file_path)
+        return JSONResponse(
+            content={"url": f"{url}",
+                     "message": "Recoverable Download error."},
+            status_code=429
+        )
 
 
 def sigint_handler(sig, frame):
