@@ -68,21 +68,25 @@ async def generate_stream(request: Request, background_tasks: BackgroundTasks, f
 
 
 def cleanup_download(file_path: str = None):
-    global global_url, downloader, tor
-    if global_url is not None:
-        global_url = None
-    if downloader is not None:
-        downloader.terminate()
-        downloader = None
-    if tor is not None and not tor_on_start:
-        tor.stop()
-        tor = None
+    cleanup_metadata(False)
     if auto_delete_downloads:
         print(f"Cleanup of: {file_path}")
         with suppress(FileNotFoundError):
             os.remove(file_path + const.DOWNPOSTFIX)
             os.remove(file_path + const.CACHEPOSTFIX)
             os.remove(file_path)
+
+
+def cleanup_metadata(cleanup_tor_if_possible: bool):
+    global global_url, downloader, tor
+    if global_url is not None:
+        global_url = None
+    if downloader is not None:
+        downloader.terminate()
+        downloader = None
+    if tor is not None and not tor_on_start and cleanup_tor_if_possible:
+        tor.stop()
+        tor = None
 
 
 @app.get("/initiate", responses={
@@ -103,7 +107,7 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
     if downloader is None:
         global_url = url
         try:
-            if not tor_on_start:
+            if not tor_on_start or tor is None:
                 tor = TorRunner(temp_path)
                 await tor.launch(captcha_solve_fnc.log)
 
@@ -114,6 +118,7 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
             while downloader.total_size is None:
                 await asyncio.sleep(0.1)
         except:
+            cleanup_metadata(True)
             return JSONResponse(
                 content={"url": f"{url}",
                          "message": "Recoverable Download error."},
@@ -170,7 +175,7 @@ async def download_endpoint(request: Request, background_tasks: BackgroundTasks,
                 "Content-Disposition": f"attachment; filename=\"{filename_encoded}\"",
             }, media_type=const.MEDIA_TYPE_STREAM)
     except:
-        cleanup_download(file_path)
+        cleanup_metadata(True)
         return JSONResponse(
             content={"url": f"{url}",
                      "message": "Recoverable Download error."},
