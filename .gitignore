@@ -16,3 +16,19 @@ parser.py
 # Ignore all local history of files
 .history
 .ionide
+
+
+# Custom
+.ucache
+.udown
+testdata/
+.mp4
+.avi
+
+
+# Custom
+.ucache
+.udown
+testdata/
+.mp4
+.avi
