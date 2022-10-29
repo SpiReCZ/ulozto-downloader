@@ -16,12 +16,15 @@ class WebAppFrontend(Frontend):
         super().__init__(supports_prompt)
 
     def captcha_log(self, msg: str, level: LogLevel = LogLevel.INFO):
-        sys.stdout.write(colors.blue("[Link solve]\t") + utils.color(msg, level) + "\033[K\r")
+        sys.stdout.write(colors.blue("[Link solve]\t") + utils.color(msg, level) + "\033[K\r\n")
 
     def captcha_stats(self, stats: Dict[str, int]):
         pass
 
     def main_log(self, msg: str, level: LogLevel = LogLevel.INFO):
+        print(utils.color(msg, level))
+
+    def tor_log(self, msg: str, level: LogLevel = LogLevel.INFO, progress: bool = False):
         print(utils.color(msg, level))
 
     def prompt(self, msg: str, level: LogLevel = LogLevel.INFO) -> str:

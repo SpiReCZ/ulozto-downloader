@@ -3,25 +3,24 @@
 import asyncio
 import os
 import signal
-import urllib.parse
-from asyncio import CancelledError
+from asyncio import CancelledError, Future
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from os import path
 from typing import Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTasks
-from starlette.responses import JSONResponse
 
-from uldlib import captcha, const
+from uldlib import captcha, const, utils
 from uldlib.captcha import AutoReadCaptcha
 from uldlib.downloader import Downloader
 from uldlib.torrunner import TorRunner
+from uldlib.utils import DownloaderError
 from ulslib import api_const
 from ulslib.api_frontend import WebAppFrontend
 from ulslib.api_segfile import AsyncSegFileReader
+from ulslib.responses import error_response, initiated_response, streaming_response
 
 app = FastAPI()
 
@@ -37,14 +36,11 @@ frontend: WebAppFrontend = WebAppFrontend()
 captcha_solve_fnc: AutoReadCaptcha = captcha.AutoReadCaptcha(
     model_path, const.MODEL_DOWNLOAD_URL, frontend)
 executor = ThreadPoolExecutor(max_workers=2)
+exception: Exception = None
 
 downloader: Downloader = None
 tor: TorRunner = None
 global_url: str = None
-
-if tor_on_start:
-    tor = TorRunner(temp_path, frontend.tor_log)
-    tor.launch()
 
 
 async def generate_stream(request: Request, background_tasks: BackgroundTasks, file_path: str, parts: int):
@@ -57,7 +53,8 @@ async def generate_stream(request: Request, background_tasks: BackgroundTasks, f
                 async for data in stream_generator:
                     if await request.is_disconnected():
                         download_canceled = True
-                        print("Client has closed download connection prematurely...")
+                        frontend.main_log("Client has closed download connection prematurely...",
+                                          level=utils.LogLevel.INFO)
                         await stream_generator.aclose()
                         return
                     yield data
@@ -71,7 +68,7 @@ async def generate_stream(request: Request, background_tasks: BackgroundTasks, f
 def cleanup_download(file_path: str = None):
     cleanup_metadata()
     if auto_delete_downloads:
-        print(f"Cleanup of: {file_path}")
+        frontend.main_log(f"Cleanup of: {file_path}", level=utils.LogLevel.INFO)
         with suppress(FileNotFoundError):
             os.remove(file_path + const.DOWNPOSTFIX)
             os.remove(file_path + const.CACHEPOSTFIX)
@@ -79,7 +76,9 @@ def cleanup_download(file_path: str = None):
 
 
 def cleanup_metadata():
-    global global_url, downloader, tor
+    global exception, global_url, downloader, tor
+    if exception is not None:
+        exception = None
     if global_url is not None:
         global_url = None
     if downloader is not None:
@@ -97,13 +96,8 @@ def cleanup_metadata():
 async def initiate(url: str, parts: Optional[int] = default_parts):
     global downloader, tor, global_url
 
-    # TODO: What happens when the same url is called twice and parts number changes?
     if global_url is not None and global_url != url:
-        return JSONResponse(
-            content={"url": f"{url}",
-                     "message": "Downloader is busy.. Free download is limited to single download."},
-            status_code=429
-        )
+        return await error_response(429, url, "Downloader is busy.. Free download is limited to single download.")
 
     if downloader is None:
         global_url = url
@@ -114,32 +108,19 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
 
             downloader = Downloader(tor, frontend, captcha_solve_fnc)
 
-            asyncio.get_event_loop().run_in_executor(executor, downloader.download, url, parts, download_path)
+            future = asyncio.get_event_loop().run_in_executor(executor, downloader.download, url, parts, download_path)
+            future.add_done_callback(downloader_callback)
 
             while downloader.total_size is None:
+                if exception is not None:
+                    raise exception
                 await asyncio.sleep(0.1)
-        except RuntimeError as e:
-            print(e)
+        except DownloaderError as e:
+            frontend.main_log(str(e), level=utils.LogLevel.WARNING)
             cleanup_metadata()
-            return JSONResponse(
-                content={"url": f"{url}",
-                         "message": "Recoverable Download error."},
-                status_code=429
-            )
+            return await error_response(429, url, "Recoverable Download error.")
 
-    file_path = downloader.output_filename
-    filename = downloader.filename
-    size = downloader.total_size
-
-    return JSONResponse(
-        content={"url": f"{url}",
-                 "filename": f"{filename}",
-                 "file_path": f"{file_path}",
-                 "size": f"{size}",
-                 "parts": f"{parts}",
-                 "message": "Downloader has started.."},
-        status_code=200
-    )
+    return await initiated_response(url, downloader.filename, downloader.output_filename, downloader.total_size, parts)
 
 
 @app.get("/download", responses={
@@ -151,39 +132,27 @@ async def download_endpoint(request: Request, background_tasks: BackgroundTasks,
     global downloader
 
     if downloader is None:
-        return JSONResponse(
-            content={"url": f"{url}",
-                     "message": "Download not initiated."},
-            status_code=400
-        )
+        return await error_response(400, url, "Download not initiated.")
     elif global_url != url:
-        return JSONResponse(
-            content={"url": f"{url}",
-                     "message": "Another download initiated."},
-            status_code=429
-        )
-
-    file_path = downloader.output_filename
-    filename = downloader.filename
-    filename_encoded = urllib.parse.quote_plus(filename)
-    size = downloader.total_size
-    parts = downloader.parts
+        return await error_response(429, url, "Another download initiated.")
 
     try:
-        return StreamingResponse(
-            generate_stream(request, background_tasks, file_path, parts),
-            headers={
-                "Content-Length": str(size),
-                "Content-Disposition": f"attachment; filename=\"{filename_encoded}\"",
-            }, media_type=api_const.MEDIA_TYPE_STREAM)
-    except RuntimeError as e:
-        print(e)
+        return await streaming_response(
+            generate_stream(request, background_tasks, downloader.output_filename, downloader.parts),
+            downloader.filename,
+            downloader.total_size)
+    except BaseException as e:
+        frontend.main_log(str(e), level=utils.LogLevel.ERROR)
         cleanup_metadata()
-        return JSONResponse(
-            content={"url": f"{url}",
-                     "message": "Recoverable Download error."},
-            status_code=429
-        )
+        return await error_response(429, url, "Recoverable Download error.")
+
+
+def downloader_callback(future: Future):
+    global exception
+    if future.exception():
+        exception = future.exception()
+    else:
+        frontend.main_log("Download finished..", level=utils.LogLevel.SUCCESS)
 
 
 def sigint_handler(sig, frame):
@@ -198,4 +167,7 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGINT, sigint_handler)
     signal.signal(signal.SIGHUP, sigint_handler)
+    if tor_on_start:
+        tor = TorRunner(temp_path, frontend.tor_log)
+        tor.launch()
     uvicorn.run(app, host="0.0.0.0", port=8000)
