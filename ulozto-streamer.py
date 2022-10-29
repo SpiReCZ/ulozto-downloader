@@ -43,8 +43,8 @@ tor: TorRunner = None
 global_url: str = None
 
 if tor_on_start:
-    tor = TorRunner(temp_path)
-    tor.launch(captcha_solve_fnc.log)
+    tor = TorRunner(temp_path, frontend.tor_log)
+    tor.launch()
 
 
 async def generate_stream(request: Request, background_tasks: BackgroundTasks, file_path: str, parts: int):
@@ -109,8 +109,8 @@ async def initiate(url: str, parts: Optional[int] = default_parts):
         global_url = url
         try:
             if not tor_on_start or tor is None:
-                tor = TorRunner(temp_path)
-                tor.launch(captcha_solve_fnc.log)
+                tor = TorRunner(temp_path, frontend.tor_log)
+                tor.launch()
 
             downloader = Downloader(tor, frontend, captcha_solve_fnc)
 
